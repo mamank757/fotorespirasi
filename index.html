@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+    <title>Kalkulator Stres Panas & VPD Padi</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 p-3 sm:p-6 text-gray-800">
+    <div class="max-w-xl mx-auto bg-white rounded-lg shadow-md p-4 sm:p-6 border-t-4 border-green-600">
+        <h2 class="text-lg sm:text-xl font-bold text-gray-800 mb-1 border-b pb-2">Kalkulator Risiko Fotorespirasi & Kehampaan Padi</h2>
+        <p class="text-xs text-gray-500 mb-4">Berdasarkan suhu, kelembapan, radiasi surya real-time, dan fase pertumbuhan tanaman.</p>
+
+        <div class="mb-4">
+            <label class="block text-sm font-semibold mb-1 text-gray-600">Fase Pertumbuhan Padi</label>
+            <select id="fase" class="w-full border rounded p-2 focus:outline-none focus:ring-2 focus:ring-green-500">
+                <option value="berbunga" selected>Berbunga (Anthesis) — paling rentan</option>
+                <option value="bunting">Bunting / Booting</option>
+                <option value="vegetatif">Vegetatif</option>
+            </select>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3 mb-4">
+            <div>
+                <label class="block text-sm font-semibold mb-1 text-gray-600">Latitude</label>
+                <input type="number" id="lat" value="-4.12" step="0.01" inputmode="decimal" class="w-full border rounded p-2 text-base focus:outline-none focus:ring-2 focus:ring-green-500">
+            </div>
+            <div>
+                <label class="block text-sm font-semibold mb-1 text-gray-600">Longitude</label>
+                <input type="number" id="lon" value="120.32" step="0.01" inputmode="decimal" class="w-full border rounded p-2 text-base focus:outline-none focus:ring-2 focus:ring-green-500">
+            </div>
+        </div>
+
+        <button onclick="dapatkanLokasi()" id="btn-lokasi" class="w-full bg-blue-600 text-white font-bold py-3 px-4 rounded mb-3 hover:bg-blue-700 transition active:scale-[0.99]">
+            📍 Gunakan Lokasi HP Saat Ini
+        </button>
+
+        <button onclick="hitungVPD()" id="btn-cek" class="w-full bg-green-600 text-white font-bold py-3 px-4 rounded hover:bg-green-700 transition active:scale-[0.99]">
+            Hitung Risiko Saat Ini
+        </button>
+
+        <div id="hasil" class="mt-6 hidden">
+            <h3 class="font-bold text-gray-700 mb-3">Parameter Iklim Real-Time</h3>
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 text-sm mb-4">
+                <div class="bg-slate-50 p-3 rounded border"><span class="block text-gray-500 mb-1 text-xs">Suhu Udara</span><strong id="suhu" class="text-base sm:text-lg">-- °C</strong></div>
+                <div class="bg-slate-50 p-3 rounded border"><span class="block text-gray-500 mb-1 text-xs">Kelembapan</span><strong id="rh" class="text-base sm:text-lg">-- %</strong></div>
+                <div class="bg-slate-50 p-3 rounded border"><span class="block text-gray-500 mb-1 text-xs">Radiasi</span><strong id="radiasi" class="text-base sm:text-lg">-- W/m²</strong></div>
+                <div class="bg-slate-50 p-3 rounded border"><span class="block text-gray-500 mb-1 text-xs">VPD</span><strong id="vpd" class="text-base sm:text-lg text-blue-600">-- kPa</strong></div>
+            </div>
+            <div id="status-box" class="p-4 rounded font-bold text-center border">
+                <span id="status-text">--</span>
+            </div>
+            <p id="jam-info" class="text-xs text-gray-500 mt-2 text-center"></p>
+            <p class="text-[11px] text-gray-400 mt-4 leading-snug">
+                Catatan: ambang suhu ~33–35°C saat berbunga mengacu pada studi kerentanan bunga padi
+                (Satake &amp; Yoshida, 1978; Jagadish dkk., 2007); ambang VPD ~1,5–2,0 kPa mengacu pada
+                literatur penutupan stomata tanaman C3. Nilai ini indikator umum — kepekaan aktual berbeda
+                per varietas dan kondisi kanopi, dan risiko kehampaan meningkat bila kondisi ini bertahan
+                lebih dari ±1 jam saat bunga mekar (umumnya pukul 10:00–13:00 waktu setempat).
+            </p>
+        </div>
+    </div>
+
+    <script>
+        function dapatkanLokasi() {
+            const btnLokasi = document.getElementById('btn-lokasi');
+            btnLokasi.textContent = "Mencari titik koordinat...";
+            btnLokasi.disabled = true;
+            btnLokasi.classList.add('opacity-75');
+
+            if (!navigator.geolocation) {
+                alert("Peramban atau HP Anda tidak mendukung fitur pelacakan lokasi.");
+                resetTombolLokasi();
+                return;
+            }
+
+            navigator.geolocation.getCurrentPosition(
+                function(position) {
+                    document.getElementById('lat').value = position.coords.latitude.toFixed(5);
+                    document.getElementById('lon').value = position.coords.longitude.toFixed(5);
+
+                    btnLokasi.textContent = "✓ Lokasi Ditemukan!";
+                    btnLokasi.classList.remove('bg-blue-600');
+                    btnLokasi.classList.add('bg-green-700');
+
+                    hitungVPD();
+
+                    // Izinkan deteksi ulang setelah beberapa detik (mis. lepas GPS drift / berpindah petak)
+                    setTimeout(resetTombolLokasi, 3000);
+                },
+                function(error) {
+                    let pesanEror = "Gagal mendapatkan lokasi. ";
+                    if (error.code === 1) pesanEror += "Izin GPS ditolak oleh pengguna.";
+                    if (error.code === 2) pesanEror += "Sinyal GPS tidak tersedia atau lemah.";
+                    if (error.code === 3) pesanEror += "Waktu permintaan habis (timeout).";
+                    alert(pesanEror + " Pastikan GPS/Lokasi HP aktif.");
+                    resetTombolLokasi();
+                },
+                { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+            );
+        }
+
+        function resetTombolLokasi() {
+            const btnLokasi = document.getElementById('btn-lokasi');
+            btnLokasi.textContent = "📍 Gunakan Lokasi HP Saat Ini";
+            btnLokasi.disabled = false;
+            btnLokasi.classList.remove('opacity-75', 'bg-green-700');
+            btnLokasi.classList.add('bg-blue-600');
+        }
+
+        async function hitungVPD() {
+            const lat = document.getElementById('lat').value;
+            const lon = document.getElementById('lon').value;
+            const fase = document.getElementById('fase').value;
+            const btn = document.getElementById('btn-cek');
+
+            btn.textContent = "Mengambil Data Cuaca...";
+            btn.disabled = true;
+            btn.classList.add('opacity-75');
+
+            try {
+                const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,shortwave_radiation&timezone=auto`;
+                const response = await fetch(url);
+                if (!response.ok) throw new Error('Network response was not ok');
+                const data = await response.json();
+
+                const suhu = data.current.temperature_2m;
+                const rh = data.current.relative_humidity_2m;
+                const radiasi = data.current.shortwave_radiation;
+
+                // Persamaan Tetens untuk tekanan uap jenuh (kPa) — standar dan sudah benar
+                const svp = 0.61078 * Math.exp((17.27 * suhu) / (suhu + 237.3));
+                const avp = svp * (rh / 100);
+                const vpd = svp - avp;
+
+                // Jam lokal, untuk mengecek apakah sedang dalam jendela anthesis (≈10:00–13:00)
+                let jamLokal = null;
+                let dalamJendelaBerbunga = false;
+                if (data.current.time) {
+                    const jamStr = data.current.time.split('T')[1];
+                    jamLokal = parseInt(jamStr.split(':')[0], 10);
+                    dalamJendelaBerbunga = jamLokal >= 10 && jamLokal < 13;
+                }
+
+                let statusMsg = "Aman - Kondisi Mendukung Fotosintesis Optimal";
+                let warnaBox = "bg-green-50 border-green-500 text-green-700";
+
+                if (radiasi <= 100) {
+                    // Radiasi rendah (malam/mendung berat): stomata tidak dalam tekanan cahaya tinggi
+                    statusMsg = "Intensitas Cahaya Rendah - Cekaman Panas Nihil";
+                    warnaBox = "bg-gray-50 border-gray-400 text-gray-600";
+                } else if (suhu >= 35 && vpd >= 2.0) {
+                    if (fase === 'berbunga' && dalamJendelaBerbunga) {
+                        statusMsg = "KRITIS - Suhu & VPD Ekstrem Saat Berbunga (Risiko Gabah Hampa Tinggi)";
+                    } else {
+                        statusMsg = "Kritis - Stomata Menutup, Fotosintesis Terhambat Berat";
+                    }
+                    warnaBox = "bg-red-50 border-red-500 text-red-700";
+                } else if (suhu >= 33 && vpd >= 1.5) {
+                    if (fase === 'berbunga' && dalamJendelaBerbunga) {
+                        statusMsg = "Waspada - Mendekati Ambang Kehampaan, Pantau Ketat";
+                    } else {
+                        statusMsg = "Waspada - Laju Asimilasi Karbon Menurun";
+                    }
+                    warnaBox = "bg-yellow-50 border-yellow-500 text-yellow-700";
+                }
+
+                document.getElementById('suhu').textContent = suhu + " °C";
+                document.getElementById('rh').textContent = rh + " %";
+                document.getElementById('radiasi').textContent = radiasi + " W/m²";
+                document.getElementById('vpd').textContent = vpd.toFixed(2) + " kPa";
+
+                const statusBox = document.getElementById('status-box');
+                statusBox.className = `p-4 rounded font-bold text-center border ${warnaBox}`;
+                document.getElementById('status-text').textContent = statusMsg;
+
+                const jamInfo = document.getElementById('jam-info');
+                if (jamLokal !== null) {
+                    jamInfo.textContent = fase === 'berbunga'
+                        ? `Jam setempat: ${jamStrPad(jamLokal)}:00 — ${dalamJendelaBerbunga ? 'sedang dalam jendela bunga mekar (paling rentan)' : 'di luar jendela bunga mekar (10:00–13:00)'}`
+                        : `Jam setempat: ${jamStrPad(jamLokal)}:00 — fase saat ini bukan fase paling rentan terhadap panas`;
+                } else {
+                    jamInfo.textContent = "";
+                }
+
+                // --- Kirim data ke Google Sheets ---
+                const webAppUrl = "https://script.google.com/macros/s/AKfycbyXwABGtDGbTJWmVRfCqceoH9nw88NP9qCdNsaEENCT2n8muED9hfFhX32SagMxXA3Opw/exec";
+                const dataKirim = {
+                    lat: lat, lon: lon, suhu: suhu, rh: rh, radiasi: radiasi,
+                    vpd: parseFloat(vpd.toFixed(2)), status: statusMsg, fase: fase
+                };
+                fetch(webAppUrl, {
+                    method: 'POST',
+                    mode: 'no-cors',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(dataKirim)
+                }).then(() => console.log("Data VPD berhasil terekam di database."))
+                  .catch(err => console.error("Gagal merekam data:", err));
+
+                document.getElementById('hasil').classList.remove('hidden');
+
+            } catch (error) {
+                alert("Gagal menarik data. Pastikan perangkat terkoneksi internet dan format koordinat benar.");
+            } finally {
+                btn.textContent = "Hitung Risiko Saat Ini";
+                btn.disabled = false;
+                btn.classList.remove('opacity-75');
+            }
+        }
+
+        function jamStrPad(h) {
+            return h.toString().padStart(2, '0');
+        }
+    </script>
+</body>
+</html>
