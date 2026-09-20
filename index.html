@@ -40,6 +40,16 @@
         </button>
 
         <div id="hasil" class="mt-6 hidden">
+            <div id="lokasi-box" class="hidden mb-4 p-3 bg-green-50 border border-green-200 rounded">
+                <div class="flex items-start gap-2">
+                    <span class="text-lg leading-none">📍</span>
+                    <div class="min-w-0">
+                        <div id="lokasi-utama" class="font-semibold text-green-800 text-sm sm:text-base break-words">Mencari nama lokasi...</div>
+                        <div id="lokasi-detail" class="text-xs text-gray-500 mt-0.5 break-words"></div>
+                    </div>
+                </div>
+            </div>
+
             <h3 class="font-bold text-gray-700 mb-3">Parameter Iklim Real-Time</h3>
             <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 text-sm mb-4">
                 <div class="bg-slate-50 p-3 rounded border"><span class="block text-gray-500 mb-1 text-xs">Suhu Udara</span><strong id="suhu" class="text-base sm:text-lg">-- °C</strong></div>
@@ -57,6 +67,8 @@
                 literatur penutupan stomata tanaman C3. Nilai ini indikator umum — kepekaan aktual berbeda
                 per varietas dan kondisi kanopi, dan risiko kehampaan meningkat bila kondisi ini bertahan
                 lebih dari ±1 jam saat bunga mekar (umumnya pukul 10:00–13:00 waktu setempat).
+                Nama desa/kecamatan berasal dari data peta OpenStreetMap (crowdsourced) — bisa saja
+                tidak lengkap untuk desa terpencil; koordinat tetap sumber kebenaran utama.
             </p>
         </div>
     </div>
@@ -118,11 +130,27 @@
             btn.disabled = true;
             btn.classList.add('opacity-75');
 
+            // Tampilkan status "mencari" untuk kotak lokasi sejak awal
+            const lokasiBox = document.getElementById('lokasi-box');
+            lokasiBox.classList.remove('hidden');
+            document.getElementById('lokasi-utama').textContent = "Mencari nama lokasi...";
+            document.getElementById('lokasi-detail').textContent = "";
+
             try {
                 const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,shortwave_radiation&timezone=auto`;
-                const response = await fetch(url);
+                const geoUrl = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=15&addressdetails=1&accept-language=id`;
+
+                // Ambil data cuaca dan nama lokasi (desa/kecamatan) secara paralel
+                const [response, lokasiData] = await Promise.all([
+                    fetch(url),
+                    fetch(geoUrl, { headers: { 'Accept-Language': 'id' } })
+                        .then(r => r.ok ? r.json() : null)
+                        .catch(() => null)
+                ]);
                 if (!response.ok) throw new Error('Network response was not ok');
                 const data = await response.json();
+
+                tampilkanLokasi(lokasiData);
 
                 const suhu = data.current.temperature_2m;
                 const rh = data.current.relative_humidity_2m;
@@ -210,6 +238,37 @@
 
         function jamStrPad(h) {
             return h.toString().padStart(2, '0');
+        }
+
+        // Reverse geocoding koordinat -> nama desa/kecamatan/kabupaten (via OpenStreetMap Nominatim, gratis, tanpa API key)
+        function tampilkanLokasi(lokasiData) {
+            const utama = document.getElementById('lokasi-utama');
+            const detail = document.getElementById('lokasi-detail');
+
+            if (!lokasiData || !lokasiData.address) {
+                utama.textContent = "Nama lokasi tidak ditemukan untuk koordinat ini";
+                detail.textContent = "";
+                return;
+            }
+
+            const a = lokasiData.address;
+            // Field OSM untuk wilayah administratif Indonesia bisa bervariasi tergantung kelengkapan data,
+            // jadi dicoba beberapa kemungkinan tag secara berurutan.
+            const desa = a.village || a.hamlet || a.suburb || a.neighbourhood || null;
+            const kecamatan = a.city_district || a.subdistrict || a.municipality || null;
+            const kabupaten = a.county || a.regency || a.city || a.town || null;
+            const provinsi = a.state || null;
+
+            const bagianUtama = [desa, kecamatan].filter(Boolean);
+            const bagianDetail = [kabupaten, provinsi].filter(Boolean);
+
+            utama.textContent = bagianUtama.length > 0
+                ? bagianUtama.join(', ')
+                : (lokasiData.display_name ? lokasiData.display_name.split(',').slice(0, 2).join(',') : "Desa tidak teridentifikasi di peta OpenStreetMap");
+
+            detail.textContent = bagianDetail.length > 0
+                ? bagianDetail.join(', ')
+                : (lokasiData.display_name || "");
         }
     </script>
 </body>
