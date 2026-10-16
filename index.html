@@ -300,6 +300,9 @@
   </div>
 
   <script>
+    // URL Web App Apps Script (gunakan URL /exec dari deployment Anda)
+    const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyNrF-F-_UBahRiqDeAmx7iRF_9CpKQX8FoF1YSabcLpb5p3lqlYtiaJApJUEKHykVL2A/exec";
+
     function dapatkanLokasi() {
       const btnLokasi = document.getElementById('btn-lokasi');
       btnLokasi.textContent = "Mencari titik koordinat...";
@@ -343,7 +346,7 @@
       const fase = document.getElementById('fase').value;
       const btn = document.getElementById('btn-cek');
 
-      btn.textContent = "Mengambil data cuaca...";
+      btn.textContent = "Mengambil data dari server...";
       btn.disabled = true;
 
       const lokasiBox = document.getElementById('lokasi-box');
@@ -352,92 +355,43 @@
       document.getElementById('lokasi-detail').textContent = "";
 
       try {
-        const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,shortwave_radiation&timezone=auto`;
-        const geoUrl = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=15&addressdetails=1&accept-language=id`;
+        // GET sederhana tanpa header khusus agar tidak kena preflight CORS
+        const url = APPS_SCRIPT_URL +
+          '?lat=' + encodeURIComponent(lat) +
+          '&lon=' + encodeURIComponent(lon) +
+          '&fase=' + encodeURIComponent(fase);
 
-        const [response, lokasiData] = await Promise.all([
-          fetch(url),
-          fetch(geoUrl, { headers: { 'Accept-Language': 'id' } })
-            .then(r => r.ok ? r.json() : null)
-            .catch(() => null)
-        ]);
-        if (!response.ok) throw new Error('Network response was not ok');
-        const data = await response.json();
+        const response = await fetch(url);
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+        const d = await response.json();
+        if (d.status !== 'sukses') throw new Error(d.pesan || 'Server menolak permintaan');
 
-        tampilkanLokasi(lokasiData);
+        tampilkanLokasi(d.lokasi);
 
-        const suhu = data.current.temperature_2m;
-        const rh = data.current.relative_humidity_2m;
-        const radiasi = data.current.shortwave_radiation;
+        document.getElementById('suhu').textContent = d.suhu + " °C";
+        document.getElementById('rh').textContent = d.rh + " %";
+        document.getElementById('radiasi').textContent = d.radiasi + " W/m²";
+        document.getElementById('vpd').textContent = d.vpd.toFixed(2) + " kPa";
 
-        // Persamaan Tetens untuk tekanan uap jenuh (kPa) — standar dan sudah benar
-        const svp = 0.61078 * Math.exp((17.27 * suhu) / (suhu + 237.3));
-        const avp = svp * (rh / 100);
-        const vpd = svp - avp;
-
-        let jamLokal = null;
-        let dalamJendelaBerbunga = false;
-        if (data.current.time) {
-          const jamStr = data.current.time.split('T')[1];
-          jamLokal = parseInt(jamStr.split(':')[0], 10);
-          dalamJendelaBerbunga = jamLokal >= 10 && jamLokal < 13;
-        }
-
-        let tingkat = 'aman';
-        let statusMsg = "Aman — kondisi mendukung fotosintesis optimal";
-
-        if (radiasi <= 100) {
-          tingkat = 'netral';
-          statusMsg = "Intensitas cahaya rendah — cekaman panas nihil (malam/mendung)";
-        } else if (suhu >= 35 && vpd >= 2.0) {
-          tingkat = 'kritis';
-          statusMsg = (fase === 'berbunga' && dalamJendelaBerbunga)
-            ? "Kritis — suhu & VPD ekstrem saat berbunga, risiko gabah hampa tinggi"
-            : "Kritis — stomata menutup, fotosintesis terhambat berat";
-        } else if (suhu >= 33 && vpd >= 1.5) {
-          tingkat = 'waspada';
-          statusMsg = (fase === 'berbunga' && dalamJendelaBerbunga)
-            ? "Waspada — mendekati ambang kehampaan, pantau ketat"
-            : "Waspada — laju asimilasi karbon menurun";
-        }
-
-        document.getElementById('suhu').textContent = suhu + " °C";
-        document.getElementById('rh').textContent = rh + " %";
-        document.getElementById('radiasi').textContent = radiasi + " W/m²";
-        document.getElementById('vpd').textContent = vpd.toFixed(2) + " kPa";
-
-        setMeter(tingkat);
+        setMeter(d.tingkat);
         const statusEl = document.getElementById('status-text');
-        statusEl.textContent = statusMsg;
-        statusEl.className = 'status-text status-' + tingkat;
+        statusEl.textContent = d.statusMsg;
+        statusEl.className = 'status-text status-' + d.tingkat;
 
         const jamInfo = document.getElementById('jam-info');
-        if (jamLokal !== null) {
-          jamInfo.textContent = fase === 'berbunga'
-            ? `Jam setempat ${jamStrPad(jamLokal)}:00 — ${dalamJendelaBerbunga ? 'dalam jendela bunga mekar (paling rentan)' : 'di luar jendela bunga mekar (10:00–13:00)'}`
-            : `Jam setempat ${jamStrPad(jamLokal)}:00 — fase saat ini bukan yang paling rentan terhadap panas`;
+        if (d.jamLokal !== null && d.jamLokal !== undefined) {
+          jamInfo.textContent = d.fase === 'berbunga'
+            ? `Jam setempat ${jamStrPad(d.jamLokal)}:00 — ${d.dalamJendela ? 'dalam jendela bunga mekar (paling rentan)' : 'di luar jendela bunga mekar (10:00–13:00)'}`
+            : `Jam setempat ${jamStrPad(d.jamLokal)}:00 — fase saat ini bukan yang paling rentan terhadap panas`;
         } else {
           jamInfo.textContent = "";
         }
 
-        // --- Kirim data ke Google Sheets ---
-        const webAppUrl = "https://script.google.com/macros/s/AKfycbz0wYaP951g6GMdPxhVK8iWLQfilapW51ZlA2IuxKtktH--9aEvg1iulgncLzAtBBeT/exec";
-        const dataKirim = {
-          lat: lat, lon: lon, suhu: suhu, rh: rh, radiasi: radiasi,
-          vpd: parseFloat(vpd.toFixed(2)), status: statusMsg, fase: fase
-        };
-        fetch(webAppUrl, {
-          method: 'POST',
-          mode: 'no-cors',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(dataKirim)
-        }).then(() => console.log("Data VPD berhasil terekam di database."))
-          .catch(err => console.error("Gagal merekam data:", err));
-
         document.getElementById('hasil').classList.remove('hidden');
 
       } catch (error) {
-        alert("Gagal menarik data. Pastikan perangkat terkoneksi internet dan format koordinat benar.");
+        console.error(error);
+        alert("Gagal menarik data. Pastikan perangkat terkoneksi internet, koordinat benar, dan Web App sudah di-deploy ulang. (" + error.message + ")");
       } finally {
         btn.textContent = "Hitung risiko saat ini";
         btn.disabled = false;
@@ -461,32 +415,17 @@
       return h.toString().padStart(2, '0');
     }
 
-    function tampilkanLokasi(lokasiData) {
+    // Nama lokasi sekarang sudah diolah server: { utama, detail } atau null
+    function tampilkanLokasi(lokasi) {
       const utama = document.getElementById('lokasi-utama');
       const detail = document.getElementById('lokasi-detail');
-
-      if (!lokasiData || !lokasiData.address) {
+      if (!lokasi || !lokasi.utama) {
         utama.textContent = "Nama lokasi tidak ditemukan untuk koordinat ini";
         detail.textContent = "";
         return;
       }
-
-      const a = lokasiData.address;
-      const desa = a.village || a.hamlet || a.suburb || a.neighbourhood || null;
-      const kecamatan = a.city_district || a.subdistrict || a.municipality || null;
-      const kabupaten = a.county || a.regency || a.city || a.town || null;
-      const provinsi = a.state || null;
-
-      const bagianUtama = [desa, kecamatan].filter(Boolean);
-      const bagianDetail = [kabupaten, provinsi].filter(Boolean);
-
-      utama.textContent = bagianUtama.length > 0
-        ? bagianUtama.join(', ')
-        : (lokasiData.display_name ? lokasiData.display_name.split(',').slice(0, 2).join(',') : "Desa tidak teridentifikasi di peta OpenStreetMap");
-
-      detail.textContent = bagianDetail.length > 0
-        ? bagianDetail.join(', ')
-        : (lokasiData.display_name || "");
+      utama.textContent = lokasi.utama;
+      detail.textContent = lokasi.detail || "";
     }
   </script>
 </body>
